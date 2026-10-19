@@ -25,15 +25,21 @@ Platform ini mengintegrasikan pemodelan statistik, algoritma *Machine Learning* 
 
 ```mermaid
 flowchart TD
-    A[Data Mentah HR<br>Excel / CSV / Supabase] --> B[Sanitasi Data & Defensive Handling<br>Pembersihan Outlier & Skala Rating]
-    B --> C[Domain Filtering<br>Pemisahan ID Administratif vs Skor Asesmen]
-    C --> D[Normalisasi Fitur Min-Max]
-    D --> E[Engine 9-Box Talent Review<br>Performance vs Potential Matrix]
-    D --> F[Model Prediktif Random Forest<br>Feature Importance & Explanatory Weight]
-    D --> G[Klasterisasi 2D PCA & K-Means<br>Pola Arketipe Perilaku Kerja]
-    D --> H[Simulasi Bobot Suksesi Dinamis<br>What-If Sensitivity & Leaderboard Drift]
-    E & F & G & H --> I[Dashboard Interaktif Streamlit & Plotly]
-    I --> J[AI Arbitrator & Profiler<br>Spesifikasi Jabatan & Rekomendasi Seleksi]
+    A["Data Mentah HR<br>(Excel / CSV / Supabase)"] --> B["Sanitasi Data & Penanganan Outlier"]
+    B --> C["Domain Metric Filtering<br>(Pemisahan ID vs Skor Asesmen)"]
+    C --> D["Normalisasi Fitur Min-Max"]
+    
+    D --> E["Engine 9-Box Talent Review<br>(Performance vs Potential)"]
+    D --> F["Model Prediktif Random Forest<br>(Analisis Bobot Kinerja)"]
+    D --> G["Klasterisasi 2D PCA + K-Means<br>(Pola Arketipe Perilaku)"]
+    D --> H["Simulasi Bobot Suksesi Dinamis<br>(What-If Sensitivity)"]
+    
+    E --> I["Dashboard Interaktif Streamlit & Plotly"]
+    F --> I
+    G --> I
+    H --> I
+    
+    I --> J["AI Selection Arbitrator & Profiler<br>(Spesifikasi Jabatan & Rekomendasi)"]
 ```
 
 ---
