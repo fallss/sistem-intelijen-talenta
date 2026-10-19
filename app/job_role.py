@@ -1,48 +1,32 @@
 # ============================================================
-# 🎯 Talent Match Intelligence System (Local Excel Version Only)
+# 🎯 Talent Match Intelligence System (Job Role Benchmark)
 # ============================================================
+
+import sys
+from pathlib import Path
+
+# Add project root to path for imports
+BASE_DIR = Path(__file__).resolve().parent.parent
+if str(BASE_DIR) not in sys.path:
+    sys.path.insert(0, str(BASE_DIR))
 
 import streamlit as st
 import pandas as pd
-import requests
+import numpy as np
 import plotly.express as px
 import plotly.graph_objects as go
-import numpy as np
+from app.config import BRAND_COLORS
+from app.utils.llm_generator import LLMGenerator
 
 # ============================================================
 # CONFIGURATIONS
 # ============================================================
 
-st.set_page_config(page_title="Talent Match Intelligence", layout="wide")
-st.title("🎯 Talent Match Intelligence System (Local Excel Version)")
+st.set_page_config(page_title="Talent Match Intelligence — Role Benchmark", layout="wide")
+st.title("🎯 Talent Match Intelligence — Role Benchmarking")
 st.markdown("---")
 
-# ============================================================
-# 🔮 LLM via OpenRouter
-# ============================================================
-
-OPENROUTER_API_KEY = "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"
-
-
-def generate_llm_response(prompt: str, model: str = "openai/gpt-4o-mini") -> str:
-    """Generate AI response from OpenRouter API."""
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": model,
-        "messages": [
-            {"role": "system", "content": "You are an expert HR talent intelligence assistant."},
-            {"role": "user", "content": prompt},
-        ],
-    }
-
-    response = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload)
-    if response.status_code != 200:
-        raise RuntimeError(f"OpenRouter API error: {response.status_code} - {response.text}")
-    return response.json()["choices"][0]["message"]["content"].strip()
-
+llm_service = LLMGenerator()
 
 # ============================================================
 # 🧰 SIDEBAR INPUT
@@ -67,10 +51,18 @@ with st.sidebar:
 
 df = pd.DataFrame()
 
+# Default fallback if available in notebooks/data
+default_path = BASE_DIR / "notebooks" / "combined_employee_data.csv"
+
 if uploaded_file is not None:
     file_ext = uploaded_file.name.split(".")[-1]
     df = pd.read_csv(uploaded_file) if file_ext == "csv" else pd.read_excel(uploaded_file)
     st.success(f"✅ Data berhasil dimuat! Jumlah baris: {len(df)}")
+elif default_path.exists():
+    df = pd.read_csv(default_path)
+    st.info(f"ℹ️ Memuat default sample dataset ({len(df):,} baris).")
+
+if not df.empty:
     st.dataframe(df.head(), use_container_width=True)
 
 # ============================================================
@@ -96,7 +88,7 @@ if not df.empty:
             x="rating",
             nbins=5,
             title="Match Rate Distribution",
-            color_discrete_sequence=["#4F46E5"],
+            color_discrete_sequence=[BRAND_COLORS["primary"]],
         )
         fig_dist.update_layout(bargap=0.2)
         st.plotly_chart(fig_dist, use_container_width=True)
@@ -131,9 +123,9 @@ if not df.empty:
         if len(numeric_cols) >= 3:
             avg_scores = df[numeric_cols].mean().to_dict()
             candidate = top_candidates.iloc[0][numeric_cols].to_dict()
-            categories = list(avg_scores.keys())
-            benchmark_vals = list(avg_scores.values())
-            candidate_vals = list(candidate.values())
+            categories = list(avg_scores.keys())[:8]  # Limit to 8 for readability
+            benchmark_vals = [avg_scores[k] for k in categories]
+            candidate_vals = [candidate[k] for k in categories]
 
             fig_radar = go.Figure()
             fig_radar.add_trace(go.Scatterpolar(r=benchmark_vals, theta=categories, fill="toself", name="Benchmark"))
@@ -145,7 +137,7 @@ if not df.empty:
         st.markdown("### 🌡 Heatmap Benchmark vs Candidates")
         if len(numeric_cols) > 0:
             fig_heat = px.imshow(
-                df[numeric_cols].corr(),
+                df[numeric_cols[:10]].corr(),
                 text_auto=True,
                 color_continuous_scale="RdBu_r",
                 title="Correlation Heatmap",
@@ -160,78 +152,38 @@ if not df.empty:
         # --- Generate Job Profile ---
         with col1:
             if st.button("📝 Generate Job Profile"):
-                try:
-                    prompt = f"""
-                    You are an HR expert. Generate a detailed job profile for the role below:
-
-                    *Role:* {role_name}
-                    *Level:* {job_level}
-                    *Purpose:* {role_purpose}
-
-                    Include:
-                    1. Summary
-                    2. Key Responsibilities
-                    3. Required Skills
-                    4. Ideal Background
-                    5. KPIs / Performance Metrics
-                    """
-                    with st.spinner("Generating job profile via OpenRouter..."):
-                        job_profile = generate_llm_response(prompt)
-                    st.success("✅ Job profile generated successfully!")
-                    st.markdown(job_profile)
-                except Exception as e:
-                    st.error(f"Error: {e}")
+                with st.spinner("Generating job profile via AI..."):
+                    job_profile = llm_service.generate_job_profile(
+                        role_name=role_name,
+                        job_level=job_level,
+                        role_purpose=role_purpose,
+                        benchmark_summary=top_candidates.describe().to_string()
+                    )
+                st.markdown(job_profile)
 
         # --- Generate Job Profile + AI Recommendation ---
         with col2:
-            if st.button("🚀 Generate Job Profile + AI Recommendation"):
-                try:
-                    prompt = f"""
-                    You are an HR expert. Generate a detailed job profile for:
+            if st.button("🚀 Generate Candidate Recommendation"):
+                top_candidates_subset = top_candidates.head(max_candidates)
+                name_col = next(
+                    (c for c in ["fullname", "name", "nama", "employee_name"] if c in top_candidates_subset.columns),
+                    top_candidates_subset.columns[0],
+                )
+                kandidat_lines = [
+                    f"- {row.get(name_col, 'UNKNOWN')} | Rating: {row.get('rating', 'N/A')}"
+                    for _, row in top_candidates_subset.iterrows()
+                ]
+                kandidat_list_text = "\n".join(kandidat_lines)
 
-                    Role: {role_name}
-                    Level: {job_level}
-                    Purpose: {role_purpose}
-                    Include Summary, Responsibilities, Skills, Background, and KPIs.
-                    """
-                    with st.spinner("Generating job profile..."):
-                        job_profile = generate_llm_response(prompt)
-                    st.success("✅ Job profile generated!")
-
-                    # Limit candidates
-                    top_candidates = top_candidates.head(max_candidates)
-                    name_col = next(
-                        (c for c in ["fullname", "name", "nama", "employee_name"] if c in top_candidates.columns),
-                        top_candidates.columns[0],
+                with st.spinner("Analyzing candidates via AI..."):
+                    rec_result = llm_service.generate_candidate_recommendations(
+                        role_name=role_name,
+                        job_level=job_level,
+                        candidates_summary=kandidat_list_text
                     )
-                    kandidat_lines = [
-                        f"- {row.get(name_col, 'UNKNOWN')} | Rating: {row.get('rating', 'N/A')}"
-                        for _, row in top_candidates.iterrows()
-                    ]
-                    kandidat_list_text = "\n".join(kandidat_lines)
-
-                    # AI Recommendation
-                    prompt2 = f"""
-                    Job Profile:
-                    {job_profile}
-
-                    Candidates:
-                    {kandidat_list_text}
-
-                    Task:
-                    Recommend the best-fit candidate for {role_name}, explain why,
-                    and provide a short summary of their strengths & development needs.
-                    """
-                    with st.spinner("Analyzing candidates via OpenRouter..."):
-                        result2 = generate_llm_response(prompt2)
-
-                    st.markdown("### 🧠 AI Recommendation & Insights")
-                    st.markdown(result2)
-
-                except Exception as e:
-                    st.error(f"Error saat rekomendasi: {e}")
+                st.markdown(rec_result)
 else:
     st.info("⬆ Silakan upload file CSV atau Excel berisi data kandidat terlebih dahulu.")
 
 st.markdown("---")
-st.caption("Dashboard includes: Match-rate, Strengths/Gaps, Radar, Heatmap, and AI-driven recommendations.")
+st.caption("Tip: Gunakan `streamlit run app/app_dashboard.py` untuk pengalaman Enterprise Dashboard lengkap.")
